@@ -1,10 +1,10 @@
 This is the README for the YPath-Specification git directory. What does it say?
 
-Here is one source document for the YPath specification: ypathspec.odt. You
-are welcome to modify it. If you think another document format is better for
-the "master doc" format, please write stuff in that, and use the magic of git
-to get it into the repository. At this stage (Oct, 2011) I'm more interested in
-producing a well-written specification. 
+The main file is ypathdoc.txt, which is in AsciiDoc format.
+
+To generate a HTML file, run:
+
+asciidoc ypathdoc.txt
 
 Cheers. 
 Peter Murphy (peterkmurphy@gmail.com)
