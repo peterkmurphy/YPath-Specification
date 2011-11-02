@@ -1,0 +1,520 @@
+= YAML Path Language (YPath) =
+Peter Murphy <peterkmurphy@gmail.com>
+V0.4, November 2011
+:toc:
+:icons:
+:numbered:
+:website: http://www.pkmurphy.com.au/ypath/
+
+.Abstract
+**********************************************************************
+YPath is a language for addressing parts of a YAML document.
+**********************************************************************
+
+
+.This document
+**********************************************************************
+This document is a working draft. The content of this specification will be subject to change, especially as a response to user feedback on the yaml-core mailing list. All comments and criticism are encouraged, especially by implementers.
+**********************************************************************
+
+== Introduction ==
+
+YPath is a language designed to address parts of a YAML document. The name of “YPath” is inspired by XPath: a URL-like path notation designed for finding information inside an XML document. 
+
+Like XPath, YPath operates on the abstract structure of documents, rather than its surface syntax. In particular, YPath acts on the representation graph of a YAML document, where data is represented as a rooted, connected, directed graph of nodes. Nodes can represent scalars objects such as strings or integers; nodes can also represent collections such as sequences or mappings, which in turn reference other nodes.
+
+YPath expressions specify patterns for matching nodes. By taking an initial node as an argument, it returns a set of nodes (possibly including itself) based on whether they match the pattern or not.
+
+=== Goals ===
+
+There are several goals for the YPath specification, and they are listed here in no particular order.
+
+==== YPath should be able to address any part of a YAML document ====
+
+All parts of a YAML document are represented in its representation graph, and YPath should be able to access any node inside it. Moreover, it should be possible to write YPath expressions that access exactly one node inside it chosen by the user. 
+
+One difference between YAML and most other data formats is that it can represent composite keys inside mappings. YPath should be able to access the node for such keys, and it should be able to access the node for its matching value inside the mapping. Finally, YPath should be able to access any node within composite keys.
+
+==== YPath should be as simple as possible ====
+
+Too many specifications become bloated as multiple parties add their own desired features to it. In contrast, YPath is a language for accessing parts of a YAML document, and only parts of a YAML document. Features can be added, but only if they aid users in the primary goal: addressing any part of a YAML document. 
+
+==== YPath should be intuitive to write and read ====
+
+YPath should be based on concepts that are familiar to most users, and should use the most appropriate syntax for these concepts. For example, the forward slash character “/” is used for indicating a descent of one layer into the data structure – the same purpose it is used in XPath.  
+
+==== Data is more important than its expression ====
+
+The same data may be expressed several different ways in a YAML document. For example, a string could theoretically be expressed in five different ways. YPath users would be more interested in extracting the data into a format they control than worry about the indentation levels used to represent it. For that reason, YPath should ignore presentation and concern itself with the data itself.  The representation graph is already part of the YAML specification, so YPath might as well utilise it. 
+
+==== YPath should not be restrictive ====
+
+YPath expressions should be based on the full set of data in the representational graph model. For example, all nodes have a tag, so expressions should be able to target particular nodes based on that tag. In addition, regular expressions should be a part of the language; simple equality checking would not be flexible enough for many users. 
+
+==== YPath results can be represented as YAML documents ====
+
+YPath returns node-sets, which reference a subset of the original representation graph. By adding a node representing the node-set, with references to its nodes inside it, it constructs a new representation graph. This can be serialized and presented as a YAML document. Alternately, it can be constructed as a native structure. 
+
+==== YAML streams are not YAML documents, but YPath should support them anyway ====
+
+A YAML stream may consist of several YAML documents, and YAML processors act on streams. However, a YPath expression acts on representation graph of a document. The YPath syntax should allow users to address particular documents in a stream. 
+
+==== Well defined YPath expressions should never throw errors on well defined YAML documents ====
+
+YPath expressions which contain syntax errors or are otherwise ill-defined cannot be used for processing. However, all well-defined YPath expressions can be used to parse arbitrary YAML documents, as long as they are well-defined in turn. The result may be an empty node set, but this is not an error according to the specification. 
+
+There are many components available in the YPath specification that are designed for specific types of data. For example, numerical comparison predicates such as "less than m" and "greater than n" are designed to evaluate nodes representing integers or floats. However, the results of these predicates are only nodes that satisfy these comparisons. Comparison predicates acting on a node representing a string return nothing, rather than throwing an error and failing. This gives YPath expressions authors a lot more freedom in writing. They can concentrate on accessing the data they want, without pre-emptively adding filters to prevent errors.
+
+=== Prerequisites ===
+
+The only information necessary to understand this specification is the YAML specification (1.0, 1.1, or 1.2) and Unicode. Understanding of XML and XPath may be helpful but is not essential.
+
+=== Prior Art ===
+  
+YPath uses many concepts found in YAML, such as its flow styles used to represent mappings and sequences. YPath also uses the same escape sequences that were "borrowed" from the C language.
+
+YPath permits users to search and match strings using regular expressions. This method was first used by Ken Thompson for the text editor ed and the text-search utility grep. Regular expressions are now available in many different programming languages. YPath tries to present the most commonly supported parts of the regular expression syntax.
+
+YPath uses many concepts first popularised in XPath, such as the “axis-node test-predicate” model for location steps. Some parts of the syntax, such as the use of "/" for descent, are re-used here.  
+
+=== Relation to XPath ===
+
+Despite the copious borrowing of concepts from the former to the latter, there is no direct relationship between XPath and YPath. However, many readers will be familiar with the XPath standard, and thus would be interested in a comparison with YPath.
+
+==== Similarities to XPath ====
+
+XPath acts on XML, which is a document-centric text format. The main ingredients of an XML document are elements, attributes and text, plus possibly processing instructions. XPath provides a mechanism for expressions to address these parts, and models the XML document as a tree of nodes, including element nodes, attribute nodes and text nodes. 
+
+In contrast, YAML is a data-centric text format, where the three primitives are mappings, sequences and scalars. YPath is designed to address these primitives, and models the document as a representation graph. 
+
+Never the less, the philosophy for both XPath and YPath is roughly the same: use expressions that reference the abstract, logical structure of a file, rather than the actual file positions of data within it. 
+
+==== Differences from XPath ====
+
+However, there are significant differences between XPath and YPath.
+
+1. XPath is the result of an effort to provide a common syntax and semantics for functionality shared between XSL Transformations and XPointer, two other specifications associated with XML. In contrast, YPath has no dependency or interaction with any other specification, apart from YAML.
+2. XPath (version 1.0) expressions can be evaluated to yield four types of objects:  node sets, Booleans, numbers and strings. This information can then be used within XSLT. In contrast, YPath expressions only yield node sets. For similar reasons, YPath lacks the arithmetic operators, casting functions and variables present in XPath.
+3. An XML file contains exactly one XML document, and XPath acts on that document. In contrast, a YAML stream may contain many YAML documents. 
+4. XPath classifies the root node of a document separately from the document element. In contrast, there is no specific classification for document roots in YAML. The root of a YAML document can be a mapping, a sequence or a scalar, and is classified as one of these types.
+5. XML elements and attributes have names, and XML elements may be assigned one or more namespaces (which are also represented as nodes in the XPath data model). In contrast, YAML nodes do not have names, and thus are not assigned to a namespace. YAML tag values may have namespaces, but this data is contained in the node for the tag, rather than treated independently.  
+6. XPath expressions can be used to reference XML comments. YAML files have comments, but are not part of the representation graph, and are ignored by YPath expressions. 
+7. The nodes in an XML document have a clear hierarchical relationship between them. For example, one element can contain another or the reverse, but it is impossible for two elements to contain each other at the same time. In contrast, it is possible for nodes to contain themselves through the use of anchors and aliases. This makes it easy to map “child” or “descendant” relationships, but less easy to find “parent” or “ancestor” relationships. For this reason, YPath does not support these types of axes.
+
+=== Implementation ===
+
+There is no implementation of the YPath specification. Limited implementations can be found here:
+
+* http://pyyaml.org/browser/trunk/yaml/ypath.py?rev=71
+* http://pyyaml.org/browser/trunk/TestingSuite/ypath.yml?rev=71
+
+== Preview ==
+
+=== The problem domain: musician data ===
+
+This section is intended as a preview to what YPath can do. Here, we consider an example of a music lover who want to create a program that stores a database of her favourite artists. She decides to use YAML as the configuration file, as it makes a good sketchpad for ideas. A first pass of the document looks like this.
+
+--------------------------------------
+---
+- &KC !muso {name: Kurt Cobain,
+    birth: 20-02-1967, 
+    death: 05-04-1994,
+    plays: [vocals, guitar],
+    bio: 'Grunge musician. What a way to go.' }
+- &JH !muso
+  name: Josh Homme
+  birth: 17-05-1973
+  death:
+  plays: 
+         - vocals
+         - guitars
+  bio: |
+    Big in the Palm Desert scene.  
+- &DG !muso 
+  name: Dave Grohl
+  birth: 14-01-1969
+  plays: [drums, guitar, vocals]
+  bio: "Cool dude. Been with a lot of bands."
+  collaborations: {[*KC, Krist Novoselic]: Nirvana,
+      [*JH, Nick Oliveri, Mark Lanegan]: Queens of the Stone Age,
+      [*JH, John Paul Jones]: Them Crooked Vultures}
+- &ДШ !muso
+  name: {en: Dmitri Shostakovich, ru: Дмитрий Шостакович, 
+        de: Dmitri Schostakowitsch}
+  birth: 25-09-1906 # Gregorian, not Julian calendar date.
+  death: 09-08-1975
+  plays: [piano] # Compositions can go later.
+  bio: >
+    Got Three "Hero of the Soviet Union" medals.
+    Didn't get along with Stalin.
+...
+--------------------------------------
+
+=== Observations ===
+
+Music purists may be appalled by this example. There is no mention of the Foo Fighters, and John Paul Jones's http://www.ledzeppelin.com/[work with other artists] curiously remains unexplored. Never the less, there are several observations that can be made about how this anonymous music lover arranged her data. 
+
+* The first observation is that the music lover has created a custom tag "muso" to represent musician data. She has implemented it as a mapping with the following keys: "name", "birth" date, "death" date,  the instrument(s) the musician "plays", and a "bio" (-graphy). Last but not least is "collaborations", which lists other people the musician has worked with. All keys are strings.
+* However, not all keys nor values are present for each musician; "death" maps to a null for Josh Homme's record, and there is no "death" key for Dave Grohl. This is hardly surprising, as neither musician is dead at the time of writing. 
+* The "collaborations" key corresponds to another mapping, where keys are sequences of musicians. In this mapping, all corresponding values are the names of the resulting band. YAML permits anything to be use as a mapping key, as long as there are no duplicates in one mapping.
+* In some cases, musicians are indicated by aliases to other records; in other cases, they are names. This is one reason that our music lover chose YAML: arbitrary data types can be mixed together in the one structure. 
+* The corresponding value for "name" keys is generally a string. However, non-English musicians such as Dmitri Shostakovich may have completely different names in their own language. For this record, the corresponding value of "name" is a mapping, where ISO 639-1 two digit language codes map onto the relevant transcription. 
+* YAML data is Unicode data. Our musician could use '\uxxxx' escape sequences to represent the characters in Shostakovich's name, but it is far easier to write it in the original Cyrillic.
+* The "bio" key always maps onto strings. YAML allows strings to be styled in several different ways: as a single quoted string, a double quoted string, a folded scalar or a literal scalar. Our musician lover has chosen each format for convenience. For example, the folded style allows her to put double quotes around "Hero of the Soviet Union" without escape sequences for the quote characters. The representation graph does not care about style information. Neither does YPath.
+
+=== Using YPath ===
+
+Given a well-formed YAML document, anyone can execute YPath expressions to extract data out of it. For the above YAML example, our music lover has the following use cases in mind.
+
+==== Find musicians ====
+
+YPath only needs to return all data with the tag "!muso". More formally, we can express all descendant nodes of the root which are musicians. So we can use:
+
++/*!muso+
+
+But YPath is a terse language for terse expressions, so the following would suffice.
+
++!muso+
+
+In the example document above, the root node is a document, and its children are exactly the musician nodes in the document. So the author could also write the following to extract the same information:
+
++/.+
+
+However, the result of evaluating "/." would not always be the same as evaluting "!muso". The author may add more nodes to the root sequence which do not represent musicians. Alternately, the author could add information for other musicians elsewhere in the document, such as the value of another musician's "collaborations" key. Either is permissible in YAML. If an author is looking for musician data, then his or her YPath expression should be explicit about it. That is why "!muso" is a lot safer. 
+
+==== Find the names of all musicians ====
+
+A valid YPath expression would find all data with the tag "!muso". For each structure found, YPath returns the corresponding value for key "name". More formally, this could be expressed in either of the following ways.
+
++!muso/value("name")+
+
+But we can use the abbreviated syntax. A plain, unquoted scalar in a YPath expression denotes a key in a mapping, and indicates that the corresponding value should be returned. So the following would be equivalent.
+
++!muso/name+
+
+==== Finds the English names of all musicians ====
+
+The data from the last use case is refined as follows: if the data is a string, return it. Otherwise, it is assumed that the data is a mapping, so return the value corresponding to the "en" key. How can this be achieved? Not all name values are strings.
+
+YPath allows data to be restricted to types by using tags - the same tags as are in YAML itself. The results can be combined by using the "|" operator, which indicates set union. So the result looks like this.
+
++!muso/(name.!!str|name.!!map/en)+
+
+==== Find the Russian names of all musicians ====
+
+Regular expressions come to the rescue. We can match all names that contain Cyrillic characters. So we look for the values of name attributes that contain Cyrillic characters. It is unnecessary to filter out name values which are mappings; regular expression predicates will ignore them.
+
++!muso/name.res("[А-Ӿ]")+
+
+Note: the expression contains a Cyrillic "А" rather than a Latin "A".
+
+==== Find all musicians that have collaborated with Dave Grohl ====
+
+YPath finds the unique record where the tag is "!muso" and the name is Dave Grohl. For this record, it finds the value for the "collaborations" key. This is a mapping, where all keys are sequences. YPath finds each key using "keys()", and returns all elements in each sequence using "*".
+
++!muso/name.!!str.="Dave Grohl"/collaborations/keys()/*+
+ 
+==== Find all musicians that have collaborated with Dave Grohl that are represented as strings ====
+
+A YPath expression here would be similar to that for the last use case, with one refinement: "YPath returns all elements in each sequence that is a string."
+
++!muso/name.!!str.="Dave Grohl"/collaborations/keys()/*.!!str+
+
+==== Find all birthdates of musicians born before 1970 ====
+
+We can use abbreviated YPath forms to find the values of birthdates, and then filter the ones that are before 1970 by using the lessthan predicate. So we can write:
+
++!muso/birthdate.lessthan(01-01-1970)+
+
+==== Find all musicians born before 1970 ====
+
+The situation is different from above - YPath needs to return the musicians with birthdays before 1970, rather than returning the birthdates themselves. So the $ operator is appended to the birthdate to indicate a predicate that musicians must supply. The contents of it are another YPath expression. The predicate is true if the expression is non-empty, and false otherwise.
+
++!muso.$(birthdate.lessthan(01-01-1970))+
+
+==== Find all musicians who are dead ====
+
+YPath  finds all musicians with the tag "!muso", and where the value for "death" is a valid timestamp. 
+
++!muso.$(death.!!timestamp)+
+
+==== Find all musicians who worked with Dave Grohl and are dead ====
+
+A valid expression would start with the "Find all musicians that have collaborated with Dave Grohl" use case, and refine it so that YPath returns all elements in each sequence that is of tag "!muso", and the value for "death" is a valid timestamp:
+
++!muso/name.!!str.="Dave Grohl"/collaborations/keys()/$(death.!!timestamp)+
+
+== YPath Components ==
+
+This section describes what YPath provides in general detail. It gives an overview of what functionality YPath provides, and the components that can be utilised to find content inside YAML streams.
+
+The primary parts of a YPath expression are document matching, value uniqueness, and the location path; only the last is required. Each will be described in turn. The location path is the "core" part of a YPath expression, where users specify what sort of data they want from a YAML document.
+
+=== Document Matching ===
+
+A YAML stream can contain one document, or it can contain multiple documents. YPath expressions can be written to target specific documents inside a stream. This is done by writing a document matching component inside the YPath expression. This component is optional. If present, always occurs at the start of the expression. If absent, then the subsequent parts of the expression is taken to act on all documents in the stream.
+
+The document matching component can be written to select a document by its index. By convention, YPath uses 0-based indices, so an index of 0 is used to select the first document in the stream to be the target of YPath, an index of 1 for the second document, and so on. For convenience, users can write -1 to select the last document in the stream.
+
+Alternatively, users can write slices to address ranges of documents in a YAML stream. For example, "0:3" would select the first to fourth documents, while "4:-1" would select the fifth to last (if any). Each document selected (if they exist) becomes the target of the subsequent parts of the YPath expression, and the remainder is ignored. YPath then acts on the representation graph     for each document selected, and creates a result set based on its components. 
+
+It is possible for users to write a document matching component for documents that don't exist in a YAML stream, or for a stream that lacks YAML documents. In that case, the application should deliver a warning, but not an error. However, it is possible for YPath to return empty result sets for a document. This is judged a successful result. 
+
+Documents in YAML streams are distinct from each other, as are their representation graphs - and each document's YPath result set is distinct from other documents' result sets. 
+
+=== Value Uniqueness ===
+
+YPath processers will take a YPath expression and a document, and return a result set. This is a set of all nodes in the document's representation graph that match the expression. YPath does not allow duplicate nodes in one result set - that is, nodes that occupy the same part of memory. However, it is possible to have two nodes with the same value. No nodes in a result set are identical to each other, but some are equal to each other
+
+For this reason, YPath allows users to specify expressions so that all values in a result set are unique. In particular, scalar values should be unique in value, while collections may be unique. This is added as YPath users may not want duplicate values in their result set, and duplicates may cause errors being passed elsewhere. Alternatively, users may indicate that duplicate values are permitted.
+
+=== Location Paths ===
+
+Location paths are the core part of the YPath syntax, as they are in XPath. The contents of a location path are evaluated relative to a context node - a node in the representation graph. Generally (but not always), this is the root node of a document.
+
+Each location path can be broken down into a series of steps, where each step is joined to the previous by the forward slash character "/". The first step is the leftmost part of the location path, and each step contains information that defines a set of nodes based on its relation to the content node. Each node in a set is used as a context node for the following step, and the node set for the following step is the union of all nodes found by evaluating that step. A YPath processor works its way along the location path until the last step is evaluated - and then the result for that step becomes the result for the location path.
+
+In XPath, there is a distinction between relative location paths, which do not start with a "/" character, and absolute location paths, which do. Absolute locations paths are always evaulated relative to the root node. YPath also distinguishes between relative and absolute location paths, but it is almost always unnecessary to define an absolute location path in YPath. Unless otherwise specified, the context node for a YPath expression is the root node of a document.
+
+=== Location Steps ===
+
+There are several parts that may be in a location step.
+
+==== Axis ====
+
+An axis specifies the relationship between the nodes selected by the location step and the context node. There are four primary axes that can be specified.
+
+* Self: the node selected by the location step is the context node itself.
+* Keys: the node selected by the location step are the keys of the context node (if the node is a map). For scalars and sequence context nodes, a keys axis returns an empty node set.
+* Values: the node selected by the location step are the values of the context node (if the node is a  map). For scalars and sequence context nodes, a values axis returns an empty node set.
+* Elem: the node selected by the location step are the elements of the context node (if the node is a sequence). For scalars and mapping context nodes, a elem axis returns an empty node set.
+
+Axes can be combined. For example, YPath allows a self and values axis to be entered by users. One common combination is "child", which is the combination of keys and values and elem. All nodes which are contained in another (mapping or sequence) are its children. Descendants are nodes which are children, grand-children and so on. 
+
+It is possible to refine axes by putting conditions on it. For sequence context nodes, it is possible to restrict elements returned by the elem axis by their index in a sequence. Users can write a single index, or a slice, akin to the document matching component.
+
+For mapping context nodes, it is also possible to refine the "values" axis by their corresponding key. There are two ways to do it.
+
+The first is to specify the key in the YPath expression. For complex keys, it is possible to write the key using YAML flow notation inside the expression. This can include "{", "}", "[", "]", ":", and even "&" and "*" characters for anchors and aliases! The values axis is then refined to return only the value with the matching key.
+
+The second method is to specify a second YPath expression which uses the key node as the context node, and is evaluated to search for particular descendants of the key. The values axis is then refined to return values whose keys return non-empty nodeset when evaluating the second YPath expression. 
+
+==== Tag Predicates ====
+
+The node set returned by the axes may then be refined to allow only those whose tags match a certain value. YPath expressions can be written to limit nodes by namespace (the URL for the tag), and by local name.
+
+==== Other Predicates ====
+
+It is possible to add other predicates to a step, which then refine the node set defined by the axes and the tag predicates. Other predicates include (but are not limited to):
+
+* Equal-to:  Only returns those nodes which are equal to a given value; returns nothing otherwise.
+* Not-equal-to: Only returns those nodes which are not equal to a value.
+* Less-than, greater-than: Only returns those nodes which are less than or greater than given value. This is useful for numerical and timestamp nodes. For other context nodes, these predicates return nothing.
+* Ranges: Only returns those nodes which are between A and B in value.
+* (Length: returns the length of strings in characters, collections in number of elements, etc. Not really a predicate, but should be passed to one.)
+* Regexp: Returns nodes only when the regular expression is evaluated to match it.
+* HasYPath: Returns nodes only when a given YPath expression evaluated on it yields a non-empty node set. This is useful when users are interested in nodes rather than its descendants, but need to pick nodes by its descendants.
+* IsYPath: Returns nodes only when a given YPath expression evaluated on itself yields itself! Possible due to the wondrous recursive nature of YAML.
+
+.Note
+**********************************************************************
+Note: the actual YPath syntax for each predicate remains to be defined. Users on the yaml-core mailing list will have their input into this process. For the time being, this specification is interested in what predicates are necessary in a useful YPath.
+**********************************************************************
+
+
+==== Set Operators in YPath ====
+
+There are three operators in YPath to combine the results of YPath expressions. They are:
+
+* Set union, indicated by the vertical bar "|" symbol. The result of evaluating A | B is the union of the result set of evaluating A and the result set of evaluating B.
+* Set intersection, indicated by the ampersand "&" symbol. The result of evaluating A & B is the intersection of the result set of evaluating A and the result set of evaluating B.
+* Set complement, indicated by the caret "^" symbol. The result of evaluating  ^A  is the complement of the result set of evaluating A relative to the (document set).
+
+Full location paths, location steps, and even sub-components of steps - such as axes or predicates - can be the arguments of set operators in YPath. Parentheses - "(" and ")" - can be used to combine the results of set operations in arbitrary order. 
+
+==== Abbreviated Steps ====
+
+For convenience, YPath allows an abbreviated notation. If a step is a plain scalar (without quotes), then for a given context node, YPath returns:
+
+* The corresponding value for the key specified by the plain scalar - if the context node is a mapping, and/or,
+* The corresponding index or range of elements in the context node, if the context node is a sequence, and the plain scalar can be "cast" to an index or range. 
+
+For other situations, YPath returns nothing.
+
+== Fundamentals of YPath ==
+
+YPath is a language for addressing parts of a YAML document or stream, and processing YPath requires the processing of YAML. To aid understanding, the following sections may paraphrase chapter 3 of the YAML specification: "Processing YAML Information". For more information, refer to the http://www.yaml.org/spec/[YAML specification] itself.
+
+=== YAML Processing ===
+
+YAML is a text format used for presenting any native data structure in a file or stream. In theory, any data structure could be converted into a YAML file which preserves its structure in a human-readable format. The verb "dump" is used to refer to this conversion, and the verb "load" denotes the reverse - taking a YAML file and converting it to native structures. 
+
+The YAML suggests (but does not mandate) that conversion between a YAML stream and the native structures use two intermediate stages. One stage is the is the representation graph, where each node in the graph correspond to a datum - a collection or an atomic object - inside the YAML stream. An analogy for the representation graph model is the DOM (Document Object Model) for XML documents. This will be described below in more detail. The other stage is the serialisation stage, where each node corresponds to an occurrence of a datum read inside the YAML stream - in the order in which it is referenced. This permits a serial event-based API to access it, analogous to how SAX can be used to parse XML. 
+
+The four stages of YAML processing - the native data structure, the representation graph, the serialisation event tree, and the character stream - are shown in the diagram below.
+
+.YAML Processing Overview (Taken from figure 3.1 of the YAML 1.2 specification)
+[caption="Figure 1: "]
+image::ypathspec-img/yamlprocess.png[YAML Processing Overview (Taken from figure 3.1 of the YAML 1.2 specification)]
+
+=== YPath Processing ===
+
+YPath uses the Representation Graph layer as its information model. It has been chosen for several reasons.
+
+* The Representation Graph is a fairly simple model, with only three types of nodes to support. This contrasts with the DOM, where at the time of writing there are twelve types of nodes to support. In addition, the Representation Graph contains data, but otherwise does not specify any methods or interfaces to interact with other applications, unlike DOM. The representation graph model provides exactly what is necessary for YPath - no more and no less.  
+* The Representation Graph model is part of the YAML specification itself, rather than specified through external documentation. This compares with XPath, where an Infoset Model had to be created specifically to support it. 
+* Other layers in the YAML specification are unsuitable for providing a data model for YPath. 
+** The presentation layer is not an abstract structure of a stream, and stylistic choices such as indentation levels should be ignored. 
+** The serialisation layer also includes information that should be ignored, such as the order of keys in a stream. 
+** Finally, the native data layer is unsuitable, as any YAML stream is likely to be implemented differently in different platforms and languages. For example, PHP does not even provide an Unicode string, and the implementation of Unicode strings in Python differs between 2.x and 3.x, and between Linux and Windows.
+
+The necessity of the Representation Graph is one instance where YAML processing differs from YPath. As the YAML specification (3.1) states: 
+
+____
+A YAML processor need not expose the serialization or representation stages. It may translate directly between native data structures and a character stream (dump and load in the diagram above).
+____
+
+YPath differs in that the representation stage must be exposed. However, the serialisation stage may or may not be exposed. The following sentences in the specification remain true for both YAML and YPath.
+____
+However, such a direct translation should take place so that the native data structures are constructed only from information available in the representation. In particular, mapping key order, comments, and tag handles should not be referenced during composition.
+____
+
+From this, it is possible to construct a simplified YPath Processing overview.
+
+.YPath Processing Overview 
+[caption="Figure 2: "]
+image::ypathspec-img/YPathProcess.png[YPath Processing Overview]
+
+In this diagram, the serialisation layer has been elided away, "parsing" is combined into composition, and serialisation is combined into presentation. Readers should not interpret this to mean that Serialisation Event Tree is incompatible with YPath. Rather, YPath processors may compose Representation Graphs from YAML streams without necessarily passing through a serialisation phase.  
+
+=== The Representation Graph Model ===
+
+A YAML stream can contain one or more documents. For each well-formed and valid document inside it, a YAML processor will compose a representation graph of data for it. Each graph is distinct from each other, and it is not possible for a graph to span multiple documents. The  Representation Graph model is the data model used by YPath, and like the last section, it may be helpful to paraphrase the YAML specification for YPath implementers. 
+
+==== Representation Graphs ====
+
+A YAML document can present many different types of data as text. Some are scalars, such as integers and strings, and others are collections (such as sequences and mappings). Composing a Representation Graph means turning the data into rooted, directed, connected graph of nodes, with each representing a datum in the original document. All nodes fall into one of the following categories, or kinds:
+
+* Mappings: a collection of unique keys, each mapping to a value. Keys and values are  nodes in their own right.
+* Sequences: an ordered collection list of elements. Each element is a node in its own right.
+* Scalars: data which cannot be represented as collections, such as integers, strings, floating point numbers and date time expressions. 
+
+.YAML Representation Model (Taken from figure 3.3 of the YAML 1.2 specification)
+[caption="Figure 3: "]
+image::ypathspec-img/yamlrepresent.png[YAML Representation Model (Taken from figure 3.3 of the YAML 1.2 specification)]
+
+==== Node Properties ====
+
+All nodes have a tag - a string - which identifies the type of the native data structure presented by the node. Tags may be global, and assigned a namespace - an URI indicating its family - which is contained in the tag property. Alternatively, tags may be local, and have no namespace. For example, "quaternion" is a local tag;, while "tag:yaml.org,2002:str" is a global tag which YAML uses for strings, with “tag:yaml.org,2002” being the standard namespace for standard YAML tags. By convention, all tags are prefixed with the "!" character in YAML streams, to distinguish it from other content. However, it would be redundant to store this character in the tag property  
+
+All scalar nodes also have a canonical format property. This is a Unicode character string which represents the same content as the data in the original content. For example, the canonical format  for "0xf", "0x0f" and "15" (all representations of the number 15) is "15". Neither mappings nor sequences have canonical format properties. 
+
+Two or more nodes are equal to each other if they have the same tag and content. However, two or more nodes are identical only if they occupy the same part of memory. Note that identity infers equality, but not vice versa.
+
+One important fact about YAML collections is that they can contain arbitrary information – including itself. For example, a YAML sequence can consist of itself, a string, another sequence, the same string, and itself again. A YAML mapping may have one key value pair consisting of a string mapping to itself, and another key value pair of itself mapping to the same string. However, no two keys of a mapping can reference nodes which are equal in value.
+
+==== Misconceptions ====
+
+As stated above, all Representation Graphs for documents are "rooted, directed, connected" graphs of nodes. To expand on this:
+
+* Each document has one root node, which can be a mapping, a sequence or a scalar itself. This corresponds to the root datum of the original YAML document. If a document's root node is a scalar, then that scalar is the only data in the document.
+* Mapping nodes contain references directed towards both its key nodes and its value nodes. Sequences nodes contain references directed towards its element nodes. However, the reverse  relationship does not hold, and the contained nodes may not refer to their containers. Scalar nodes are not collections, and thus do not contain references to other nodes.
+* A YAML document is composed to create one connected graph of nodes; it is impossible to create two or more unconnected graph from one YAML document. 
+ 
+==== Limitations of the Representation Graph model ====
+
+There are presentation details in a YAML document that cannot be accessed by YPath. 
+
+* YPath cannot identify or select collections based on whether they were expressed in block or flow form. 
+* YPath cannot identify or select strings or other scalars based on whether they were expressed as singled-quoted, double quoted, or otherwise. 
+* YPath cannot identify nodes based on their anchor value.
+* YPath cannot return the value of directives such as TAG or YAML.
+* YPath cannot return the value of comments. 
+
+This is because this information is discarded when translated into the representation model. 
+
+=== Evaluating YPath ===
+
+The core operation of YPath is evaluating: taking a YPath expression, composing a stream to one or more representation graphs, and finding out which nodes in each graph are returned from it. A YPath expression consists of the following parts:
+
+* A document matching part. This indicates which documents in the stream are accessed by the YPath expression.
+* Uniqueness expression. This indicates whether duplicate elements with equal value can be returned by the expression, or whether all elements have to have unique values. 
+* The core YPath expression, which is used to match data in each document specified by the document matching part.
+
+There are three possible situations which may occur:
+
+* Error. This occurs if the YPath expression is not well formed or the YAML stream is not well formed.
+* Warning. This occurs if the YPath expression is well formed but no documents are matched in the stream.
+* Success. This occurs if the YPath expression is well formed and documents are matched inside the stream. A node set is returned for each document matched; all, any or none of them may be empy.
+
+Node sets can take two forms.
+
+* A set: a mapping consisting of unique keys with no matching values. This tag for this is !!set.
+* A multiset: a sequence of nodes which may contain repeated values. The order of elements for each may match the order they were found in the original document.
+
+Each node set returned - whether set or multiset - is the root node of a new representation graph, and nodes returned by the YPath expression are elements of it. It is then possible to perform the following operations:
+
+* Presentation: Each representation graph is presented into a YAML document, and a new stream is constructed consisting of all aforesaid documents concatenated altogether. 
+* Construction: All representation graphs are constructed into native data.
+* Representation: the reverse operation of construction. 
+
+== YPath Expressions ==
+
+This is the section which delves into the syntax of YPath. Like the YAML specification, this document uses parameterized BNF productions. Each BNF production is both named and numbered for easy reference. Whenever possible, basic structures are specified before the more complex structures using them in a “bottom up” fashion. 
+
+The order of alternatives inside a production is significant. Subsequent alternatives are only considered when previous ones fails. In addition, production matching is expected to be greedy. Optional (?), zero-or-more (*) and one-or-more (+) patterns are always expected to match as much of the input as possible. 
+
+=== YPath character set ===
+
+YPath expressions are strings consisting of Unicode characters - in particular printable Unicode characters.  So we can use the same production for YAML.
+
+
+----
+[1] c-printable ::= #x9 | #xA | #xD | [#x20-#x7E] /* 8 bit */
+| #x85 | [#xA0-#xD7FF] | [#xE000-#xFFFD] /* 16 bit */
+| [#x10000-#x10FFFF] /* 32 bit */ 
+----
+
+Note that this specification does not mandate the encoding used to represent it. YPath expressions could be used inside YAML streams (or other files), but may also be shared between applications, each of which has its own format for representing strings. 
+
+YPath expressions cannot contain the byte order mark character #xFFFE, because the order of bytes would be determined by the medium used to contain it. Other characters excluded from a YPath string are the C0 and C1 control blocks (except for the tab, LF, CR and NEL characters), DEL (#x7F), the surrogate block ##xD800-#xDFFF, and the error non-character #xFFFF.
+
+
+
+[bibliography]
+Example Bibliography
+--------------------
+The bibliography list is a style of AsciiDoc bulleted list.
+
+[bibliography]
+- [[[taoup]]] Eric Steven Raymond. 'The Art of Unix
+  Programming'. Addison-Wesley. ISBN 0-13-142901-9.
+- [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.
+  'DocBook - The Definitive Guide'. O'Reilly & Associates. 1999.
+  ISBN 1-56592-580-7.
+
+
+[glossary]
+Example Glossary
+----------------
+Glossaries are optional. Glossaries entries are an example of a style
+of AsciiDoc labeled lists.
+
+[glossary]
+A glossary term::
+  The corresponding (indented) definition.
+
+A second glossary term::
+  The corresponding (indented) definition.
+
+
+ifdef::backend-docbook[]
+[index]
+Example Index
+-------------
+////////////////////////////////////////////////////////////////
+The index is normally left completely empty, it's contents being
+generated automatically by the DocBook toolchain.
+////////////////////////////////////////////////////////////////
+endif::backend-docbook[]
+
